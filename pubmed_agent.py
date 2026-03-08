@@ -26,14 +26,18 @@ def _log(msg: str):
 
 def cmd_search(args, db: Database):
     """Search PubMed and store article metadata."""
+    max_results = 10000 if getattr(args, "all", False) else args.max_results
+    
     _log(f"Searching PubMed: '{args.topic}' ({args.from_date} to {args.to_date})")
+    if getattr(args, "all", False):
+        print("Fetching ALL available articles (up to 10,000 max)")
 
     search_id = db.create_search(
-        args.topic, args.from_date, args.to_date, args.max_results
+        args.topic, args.from_date, args.to_date, max_results
     )
     print(f"Search ID: {search_id}")
 
-    pmids = search_pmids(args.topic, args.from_date, args.to_date, args.max_results)
+    pmids = search_pmids(args.topic, args.from_date, args.to_date, max_results)
     if not pmids:
         db.update_search(search_id, status="completed", total_found=0)
         print("No articles found.")
@@ -184,21 +188,25 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full pipeline (default: xai/grok-4-0709)
+  # Full pipeline with ALL available articles (default: xai/grok-4-0709)
   python pubmed_agent.py pipeline --topic "pancreatic cancer immunotherapy" \\
-      --from-date 2020-01-01 --to-date 2026-03-07 --max-results 200
+      --from-date 2020-01-01 --to-date 2026-03-07 --all
+
+  # Full pipeline with specific limit
+  python pubmed_agent.py pipeline --topic "pancreatic cancer immunotherapy" \\
+      --from-date 2020-01-01 --to-date 2026-03-07 --max-results 500
 
   # Use Google Gemini instead
   python pubmed_agent.py pipeline --topic "BRCA mutations" \\
-      --from-date 2022-01-01 --to-date 2026-03-07 --provider google
+      --from-date 2022-01-01 --to-date 2026-03-07 --all --provider google
 
   # Use Anthropic Claude with specific model
   python pubmed_agent.py summarize --search-id 1 \\
       --provider anthropic --model claude-sonnet-4-20250514
 
-  # Search only
+  # Search only (fetch all articles)
   python pubmed_agent.py search --topic "BRCA mutations breast cancer" \\
-      --from-date 2022-01-01 --to-date 2026-03-07
+      --from-date 2022-01-01 --to-date 2026-03-07 --all
 
   # Download full texts for an existing search
   python pubmed_agent.py download --search-id 1
@@ -221,7 +229,8 @@ Examples:
     p_pipe.add_argument("--topic", required=True, help="Search topic")
     p_pipe.add_argument("--from-date", required=True, help="Start date (YYYY-MM-DD)")
     p_pipe.add_argument("--to-date", required=True, help="End date (YYYY-MM-DD)")
-    p_pipe.add_argument("--max-results", type=int, default=200, help="Max articles to retrieve")
+    p_pipe.add_argument("--max-results", type=int, default=200, help="Max articles to retrieve (ignored if --all is set)")
+    p_pipe.add_argument("--all", action="store_true", help="Fetch ALL available articles (up to 10,000 max)")
     p_pipe.add_argument("--workers", type=int, default=4, help="Parallel download workers")
     p_pipe.add_argument("--provider", choices=["xai", "google", "anthropic"], default=None, help=llm_help)
     p_pipe.add_argument("--model", default=None, help=model_help)
@@ -231,7 +240,8 @@ Examples:
     p_search.add_argument("--topic", required=True, help="Search topic")
     p_search.add_argument("--from-date", required=True, help="Start date (YYYY-MM-DD)")
     p_search.add_argument("--to-date", required=True, help="End date (YYYY-MM-DD)")
-    p_search.add_argument("--max-results", type=int, default=200, help="Max articles to retrieve")
+    p_search.add_argument("--max-results", type=int, default=200, help="Max articles to retrieve (ignored if --all is set)")
+    p_search.add_argument("--all", action="store_true", help="Fetch ALL available articles (up to 10,000 max)")
 
     # Download
     p_dl = subparsers.add_parser("download", help="Download full texts for an existing search")

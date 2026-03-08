@@ -29,18 +29,26 @@ cp .env.example .env
 ### Full Pipeline (search + download + summarize)
 
 ```bash
-# Default: xAI grok-4-1-fast-reasoning
+# Fetch ALL available articles (up to 10,000 max)
 python pubmed_agent.py pipeline \
     --topic "pancreatic cancer immunotherapy" \
     --from-date 2020-01-01 \
     --to-date 2026-03-07 \
-    --max-results 200
+    --all
 
-# Use Google Gemini
+# Limit to specific number (default: 200)
 python pubmed_agent.py pipeline \
     --topic "pancreatic cancer immunotherapy" \
     --from-date 2020-01-01 \
     --to-date 2026-03-07 \
+    --max-results 500
+
+# Use Google Gemini with all articles
+python pubmed_agent.py pipeline \
+    --topic "pancreatic cancer immunotherapy" \
+    --from-date 2020-01-01 \
+    --to-date 2026-03-07 \
+    --all \
     --provider google
 
 # Use a specific model
@@ -48,15 +56,16 @@ python pubmed_agent.py pipeline \
     --topic "pancreatic cancer immunotherapy" \
     --from-date 2020-01-01 \
     --to-date 2026-03-07 \
-    --provider xai --model grok-4-1
+    --all \
+    --provider xai --model grok-3
 ```
 
 ### Individual Steps
 
 ```bash
-# Search PubMed and store metadata
+# Search PubMed and store metadata (fetch all)
 python pubmed_agent.py search --topic "BRCA mutations breast cancer" \
-    --from-date 2022-01-01 --to-date 2026-03-07
+    --from-date 2022-01-01 --to-date 2026-03-07 --all
 
 # Download full texts and PDFs for an existing search
 python pubmed_agent.py download --search-id 1
