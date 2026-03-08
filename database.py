@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS summaries (
     md_path TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS intermediate_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id INTEGER NOT NULL REFERENCES searches(id),
+    step_type TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    date_range_start TEXT,
+    date_range_end TEXT,
+    articles_count INTEGER,
+    summary_text TEXT,
+    model TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(search_id, step_type, step_index)
+);
 """
 
 _INDEXES = """
@@ -94,6 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_fulltexts_article ON full_texts(article_id);
 CREATE INDEX IF NOT EXISTS idx_fulltexts_pmid ON full_texts(pmid);
 CREATE INDEX IF NOT EXISTS idx_pdfs_article ON pdfs(article_id);
 CREATE INDEX IF NOT EXISTS idx_summaries_search ON summaries(search_id);
+CREATE INDEX IF NOT EXISTS idx_intermediates_search ON intermediate_summaries(search_id);
 """
 
 
@@ -329,6 +344,70 @@ class Database:
             (search_id,),
         ).fetchone()
         return dict(row) if row else None
+
+    # ── Intermediate Summaries ──────────────────────────────────────────
+
+    def insert_intermediate(
+        self,
+        search_id: int,
+        step_type: str,
+        step_index: int,
+        summary_text: str,
+        model: str,
+        date_range_start: str = "",
+        date_range_end: str = "",
+        articles_count: int = 0,
+    ) -> int:
+        conn = self.connect()
+        cursor = conn.execute(
+            """INSERT OR REPLACE INTO intermediate_summaries
+               (search_id, step_type, step_index, summary_text, model,
+                date_range_start, date_range_end, articles_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (search_id, step_type, step_index, summary_text, model,
+             date_range_start, date_range_end, articles_count),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_intermediate(
+        self, search_id: int, step_type: str, step_index: int
+    ) -> Optional[dict]:
+        conn = self.connect()
+        row = conn.execute(
+            """SELECT * FROM intermediate_summaries
+               WHERE search_id = ? AND step_type = ? AND step_index = ?""",
+            (search_id, step_type, step_index),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_all_intermediates(
+        self, search_id: int, step_type: Optional[str] = None
+    ) -> list[dict]:
+        conn = self.connect()
+        if step_type:
+            rows = conn.execute(
+                """SELECT * FROM intermediate_summaries
+                   WHERE search_id = ? AND step_type = ?
+                   ORDER BY step_index""",
+                (search_id, step_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM intermediate_summaries
+                   WHERE search_id = ?
+                   ORDER BY step_type, step_index""",
+                (search_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def clear_intermediates(self, search_id: int):
+        conn = self.connect()
+        conn.execute(
+            "DELETE FROM intermediate_summaries WHERE search_id = ?",
+            (search_id,),
+        )
+        conn.commit()
 
     # ── Stats ───────────────────────────────────────────────────────────
 

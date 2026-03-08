@@ -6,6 +6,7 @@ Supports HTTP and FTP protocols for PDF downloads.
 """
 
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -148,10 +149,22 @@ def _fetch_via_doi(doi: str) -> Optional[str]:
     return None
 
 
+_thread_local = threading.local()
+
+
+def _get_thread_db(db_path: str) -> Database:
+    """Return a per-thread Database connection, creating one if needed."""
+    db = getattr(_thread_local, "db", None)
+    if db is None:
+        db = Database(db_path)
+        db.connect()
+        _thread_local.db = db
+    return db
+
+
 def _process_article(article: dict, db_path: str) -> dict:
     """Download full text and PDF for a single article. Returns status dict."""
-    thread_db = Database(db_path)
-    thread_db.connect()
+    thread_db = _get_thread_db(db_path)
 
     pmid = article["pmid"]
     pmcid = article.get("pmcid")
@@ -186,7 +199,6 @@ def _process_article(article: dict, db_path: str) -> dict:
                 thread_db.insert_pdf(article_id, pmid, pdf_data, pdf_url)
                 result["pdf"] = True
 
-    thread_db.close()
     return result
 
 

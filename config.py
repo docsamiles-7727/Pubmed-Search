@@ -13,11 +13,22 @@ NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "xai")
 LLM_MODEL = os.getenv("LLM_MODEL", "grok-4-0709")
 
+OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/v1/chat/completions")
+LMSTUDIO_API_URL = os.getenv("LMSTUDIO_API_URL", "http://localhost:1234/v1/chat/completions")
+INFERENCER_API_URL = os.getenv("INFERENCER_API_URL", "http://localhost:54321/v1/chat/completions")
+
+MAX_CHUNK_TOKENS = int(os.getenv("MAX_CHUNK_TOKENS", "200000"))
+
 PROVIDER_DEFAULTS = {
     "xai": {"model": "grok-4-0709", "key_env": "XAI_API_KEY"},
     "google": {"model": "gemini-2.5-flash", "key_env": "GOOGLE_API_KEY"},
     "anthropic": {"model": "claude-sonnet-4-20250514", "key_env": "ANTHROPIC_API_KEY"},
+    "ollama": {"model": "llama3.1:70b", "api_url": OLLAMA_API_URL},
+    "lmstudio": {"model": "loaded-model", "api_url": LMSTUDIO_API_URL},
+    "inferencer": {"model": "loaded-model", "api_url": INFERENCER_API_URL},
 }
+
+LOCAL_PROVIDERS = {"ollama", "lmstudio", "inferencer"}
 
 RATE_LIMIT_DELAY = 0.12 if NCBI_API_KEY else 0.35
 
@@ -36,12 +47,18 @@ BULK_INSERT_BATCH_SIZE = 500
 
 
 def get_api_key(provider: str) -> str:
+    if provider in LOCAL_PROVIDERS:
+        return "local"
     keys = {
         "xai": XAI_API_KEY,
         "google": GOOGLE_API_KEY,
         "anthropic": ANTHROPIC_API_KEY,
     }
     return keys.get(provider, "")
+
+
+def get_api_url(provider: str) -> str:
+    return PROVIDER_DEFAULTS.get(provider, {}).get("api_url", "")
 
 
 def get_default_model(provider: str) -> str:

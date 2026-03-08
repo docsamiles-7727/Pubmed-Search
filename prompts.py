@@ -86,6 +86,39 @@ BATCH SUMMARIES:
 Write a thorough, well-organized literature review in markdown format. Be comprehensive but concise. Every claim must be cited."""
 
 
+MERGE_PROMPT = """You are a senior medical research analyst performing an incremental literature review. You have two inputs:
+
+1. **ACCUMULATED SUMMARY**: A structured summary of OLDER literature (published earlier in the date range)
+2. **NEW CHUNK SUMMARY**: A structured summary of MORE RECENT literature (published later in the date range)
+
+Your task is to merge these into a single, unified structured summary.
+
+CRITICAL RULES:
+- Preserve ALL [PMID: XXXXXXXX] citations from BOTH inputs. Never drop a citation.
+- Where findings from the newer chunk UPDATE, CONTRADICT, or SUPERSEDE older findings, prefer the newer evidence and note the evolution (e.g., "Earlier studies suggested X [PMID: ...], but more recent evidence demonstrates Y [PMID: ...]").
+- Where findings are complementary, integrate them into a coherent narrative.
+- Maintain the following section structure (skip any section with no relevant data):
+
+1. PATHOBIOLOGY
+2. MOLECULAR AND IMMUNOLOGIC CHARACTERISTICS
+3. TREATMENT BY STAGE
+4. NEOADJUVANT AND ADJUVANT APPROACHES
+5. EXPERIMENTAL APPROACHES
+6. LIMITATIONS
+7. KEY FINDINGS
+
+---
+ACCUMULATED SUMMARY (older literature):
+{accumulated_summary}
+
+---
+NEW CHUNK SUMMARY (more recent literature):
+{new_chunk_summary}
+---
+
+Produce a merged, well-structured markdown summary. Prioritize recent findings but preserve the historical context and all citations."""
+
+
 def format_articles_for_prompt(articles: list[dict]) -> str:
     """Format a list of articles into text for the LLM prompt."""
     parts = []

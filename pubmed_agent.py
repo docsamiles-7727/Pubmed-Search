@@ -3,7 +3,8 @@
 
 Searches PubMed, downloads free full-text articles and PDFs,
 stores everything in SQLite, and generates structured literature
-reviews using xAI Grok, Google Gemini, or Anthropic Claude.
+reviews using cloud LLMs (xAI, Google, Anthropic) or local inference
+servers (Ollama, LM Studio, Inferencer).
 """
 
 import argparse
@@ -118,10 +119,13 @@ def cmd_summarize(args, db: Database):
     effective_provider = provider or config.LLM_PROVIDER
     effective_model = model or config.LLM_MODEL or config.get_default_model(effective_provider)
 
+    chunk_tokens = getattr(args, "chunk_tokens", None)
+
     _log(f"Summarizing search {search_id}: '{search['topic']}' with {effective_provider}/{effective_model}")
     db.update_search(search_id, status="summarizing")
 
-    summary_md = run_summarization(db, search_id, provider=provider, model=model)
+    summary_md = run_summarization(db, search_id, provider=provider, model=model,
+                                   chunk_tokens=chunk_tokens)
 
     paths = generate_outputs(summary_md, search["topic"])
 
@@ -169,6 +173,37 @@ def cmd_pipeline(args, db: Database):
     print(f"  PDFs: {final_stats['pdfs']}")
 
 
+def cmd_list_models(args, db: Database):
+    """List available models from a local inference server."""
+    import requests as _req
+
+    provider = args.provider
+    if provider not in config.LOCAL_PROVIDERS:
+        print(f"'{provider}' is not a local provider. Choose from: {', '.join(config.LOCAL_PROVIDERS)}")
+        return
+
+    api_url = config.get_api_url(provider)
+    models_url = api_url.rsplit("/chat/completions", 1)[0] + "/models"
+
+    try:
+        resp = _req.get(models_url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"Could not reach {provider} at {models_url}: {e}")
+        return
+
+    models = data.get("data", [])
+    if not models:
+        print(f"No models found at {models_url}")
+        return
+
+    print(f"Models available on {provider} ({models_url}):\n")
+    for m in models:
+        print(f"  {m.get('id', 'unknown')}")
+    print(f"\nUse with: --provider {provider} --model <model-id>")
+
+
 def cmd_status(args, db: Database):
     """Show status of searches."""
     searches = db.list_searches()
@@ -192,9 +227,18 @@ Examples:
   python pubmed_agent.py pipeline --topic "pancreatic cancer immunotherapy" \\
       --from-date 2020-01-01 --to-date 2026-03-07 --all
 
-  # Full pipeline with specific limit
-  python pubmed_agent.py pipeline --topic "pancreatic cancer immunotherapy" \\
-      --from-date 2020-01-01 --to-date 2026-03-07 --max-results 500
+  # Use a local Ollama model (reduce chunk size for smaller context windows)
+  python pubmed_agent.py pipeline --topic "BRCA mutations" \\
+      --from-date 2022-01-01 --to-date 2026-03-07 --all \\
+      --provider ollama --model llama3.1:70b --chunk-tokens 16000
+
+  # Use LM Studio with whatever model is loaded
+  python pubmed_agent.py summarize --search-id 1 \\
+      --provider lmstudio --model loaded-model --chunk-tokens 24000
+
+  # Use Inferencer (macOS, port 54321)
+  python pubmed_agent.py summarize --search-id 1 \\
+      --provider inferencer --model loaded-model --chunk-tokens 24000
 
   # Use Google Gemini instead
   python pubmed_agent.py pipeline --topic "BRCA mutations" \\
@@ -221,8 +265,10 @@ Examples:
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
-    llm_help = "LLM provider: xai, google, or anthropic (default: xai)"
-    model_help = "LLM model override (default: provider-specific, e.g. grok-4-0709)"
+    all_providers = ["xai", "google", "anthropic", "ollama", "lmstudio", "inferencer"]
+    llm_help = "LLM provider (default: xai). Local: ollama, lmstudio, inferencer"
+    model_help = "LLM model override (default: provider-specific)"
+    chunk_help = "Max tokens per article chunk (default: 200000, lower for local models e.g. 8000-32000)"
 
     # Pipeline
     p_pipe = subparsers.add_parser("pipeline", help="Full pipeline: search + download + summarize")
@@ -232,8 +278,9 @@ Examples:
     p_pipe.add_argument("--max-results", type=int, default=200, help="Max articles to retrieve (ignored if --all is set)")
     p_pipe.add_argument("--all", action="store_true", help="Fetch ALL available articles (up to 10,000 max)")
     p_pipe.add_argument("--workers", type=int, default=4, help="Parallel download workers")
-    p_pipe.add_argument("--provider", choices=["xai", "google", "anthropic"], default=None, help=llm_help)
+    p_pipe.add_argument("--provider", choices=all_providers, default=None, help=llm_help)
     p_pipe.add_argument("--model", default=None, help=model_help)
+    p_pipe.add_argument("--chunk-tokens", type=int, default=None, help=chunk_help)
 
     # Search
     p_search = subparsers.add_parser("search", help="Search PubMed and store metadata")
@@ -251,8 +298,14 @@ Examples:
     # Summarize
     p_sum = subparsers.add_parser("summarize", help="Generate literature review from DB")
     p_sum.add_argument("--search-id", type=int, required=True, help="Search ID")
-    p_sum.add_argument("--provider", choices=["xai", "google", "anthropic"], default=None, help=llm_help)
+    p_sum.add_argument("--provider", choices=all_providers, default=None, help=llm_help)
     p_sum.add_argument("--model", default=None, help=model_help)
+    p_sum.add_argument("--chunk-tokens", type=int, default=None, help=chunk_help)
+
+    # List models
+    p_models = subparsers.add_parser("list-models", help="List models on a local inference server")
+    p_models.add_argument("--provider", choices=list(config.LOCAL_PROVIDERS), required=True,
+                          help="Local provider to query")
 
     # Status
     subparsers.add_parser("status", help="Show status of all searches")
@@ -274,6 +327,8 @@ Examples:
             cmd_download(args, db)
         elif args.command == "summarize":
             cmd_summarize(args, db)
+        elif args.command == "list-models":
+            cmd_list_models(args, db)
         elif args.command == "status":
             cmd_status(args, db)
     finally:

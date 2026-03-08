@@ -30,14 +30,34 @@ def _api_params(extra: dict) -> dict:
     return params
 
 
-def _get_xml(url: str, params: dict, timeout: int = 30) -> Optional[ET.Element]:
-    try:
-        resp = _session.get(url, params=_api_params(params), timeout=timeout)
-        resp.raise_for_status()
-        return ET.fromstring(resp.content)
-    except Exception as e:
-        _log(f"XML fetch failed: {e}")
-        return None
+def _get_xml(url: str, params: dict, timeout: int = 30,
+             max_retries: int = 4) -> Optional[ET.Element]:
+    backoff = [1, 3, 10, 30]
+    for attempt in range(max_retries):
+        try:
+            resp = _session.get(url, params=_api_params(params), timeout=timeout)
+            if resp.status_code == 429:
+                delay = backoff[min(attempt, len(backoff) - 1)]
+                _log(f"Rate limited (429), retrying in {delay}s "
+                     f"(attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return ET.fromstring(resp.content)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                delay = backoff[min(attempt, len(backoff) - 1)]
+                _log(f"Rate limited (429), retrying in {delay}s "
+                     f"(attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                continue
+            _log(f"XML fetch failed: {e}")
+            return None
+        except Exception as e:
+            _log(f"XML fetch failed: {e}")
+            return None
+    _log(f"XML fetch failed after {max_retries} retries (rate limited)")
+    return None
 
 
 def _text(el: Optional[ET.Element], default: str = "") -> str:
@@ -340,26 +360,24 @@ def _fetch_links_batch(pmids: list[str]) -> dict[str, dict]:
 
 
 def enrich_with_links(pmids: list[str]) -> dict[str, dict]:
-    """Get PMCIDs and citation counts for all PMIDs (batched)."""
+    """Get PMCIDs and citation counts for all PMIDs (batched, sequential)."""
     if not pmids:
         return {}
 
     batch_size = 100
     batches = [pmids[i : i + batch_size] for i in range(0, len(pmids), batch_size)]
-    _log(f"Fetching links/citations in {len(batches)} batch(es)...")
+    n_batches = len(batches)
+    _log(f"Fetching links/citations in {n_batches} batch(es) (sequential)...")
 
     all_results = {}
-    with ThreadPoolExecutor(max_workers=min(4, len(batches))) as executor:
-        futures = {}
-        for batch in batches:
-            time.sleep(config.RATE_LIMIT_DELAY)
-            futures[executor.submit(_fetch_links_batch, batch)] = len(batch)
-
-        for future in as_completed(futures):
-            try:
-                all_results.update(future.result())
-            except Exception as e:
-                _log(f"Link fetch error: {e}")
+    for i, batch in enumerate(batches):
+        _log(f"elink batch {i + 1}/{n_batches}...")
+        try:
+            results = _fetch_links_batch(batch)
+            all_results.update(results)
+        except Exception as e:
+            _log(f"Link fetch error on batch {i + 1}: {e}")
+        time.sleep(config.RATE_LIMIT_DELAY)
 
     pmc_count = sum(1 for v in all_results.values() if v.get("pmcid"))
     _log(f"Found {pmc_count} articles with PMC full text, enriched citation counts")
