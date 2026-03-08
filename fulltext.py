@@ -2,13 +2,17 @@
 
 Downloads free full text from PMC (via efetch or OA service) and
 falls back to trafilatura for publisher pages accessible via DOI.
+Supports HTTP and FTP protocols for PDF downloads.
 """
 
 import sys
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from ftplib import FTP
 from typing import Optional
+from urllib.parse import urlparse
+from io import BytesIO
 
 import requests
 import trafilatura
@@ -85,8 +89,34 @@ def _fetch_pmc_pdf_url(pmcid: str) -> Optional[str]:
         return None
 
 
+def _download_pdf_ftp(url: str) -> Optional[bytes]:
+    """Download a PDF file via FTP."""
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc
+        path = parsed.path
+        
+        ftp = FTP(host, timeout=60)
+        ftp.login()
+        
+        buf = BytesIO()
+        ftp.retrbinary(f"RETR {path}", buf.write)
+        ftp.quit()
+        
+        data = buf.getvalue()
+        if len(data) < 1000:
+            return None
+        return data
+    except Exception as e:
+        _log(f"FTP PDF download failed from {url}: {e}")
+        return None
+
+
 def _download_pdf(url: str) -> Optional[bytes]:
-    """Download a PDF file."""
+    """Download a PDF file via HTTP or FTP."""
+    if url.startswith("ftp://"):
+        return _download_pdf_ftp(url)
+    
     try:
         resp = _session.get(url, timeout=60, stream=True)
         resp.raise_for_status()
