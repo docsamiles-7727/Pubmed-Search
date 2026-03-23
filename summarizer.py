@@ -24,8 +24,8 @@ from prompts import (
 
 _session = requests.Session()
 
-_BACKOFF_DELAYS = [5, 20, 60]
-_MAX_RETRIES = 3
+_BACKOFF_DELAYS = [5, 20, 60, 120]
+_MAX_RETRIES = 4
 
 
 def _log(msg: str):
@@ -46,8 +46,11 @@ def _strip_thinking(text: str) -> str:
 
 
 def _timeout_for_tokens(token_count: int) -> int:
-    """Scale HTTP timeout with prompt size: at least 300s, +1s per 200 tokens."""
-    return max(300, token_count // 200)
+    """Scale HTTP timeout with prompt size. Large prompts (e.g. merge steps) need
+    more time for the API to process. Minimum 600s (10 min), +1s per ~75 input tokens,
+    capped at 1200s (20 min) to avoid indefinite waits.
+    """
+    return min(1200, max(600, 300 + token_count // 75))
 
 
 def _call_xai(prompt: str, api_key: str, model: str, max_tokens: int,
