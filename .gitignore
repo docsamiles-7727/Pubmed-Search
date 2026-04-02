@@ -18,3 +18,8 @@ build/
 *.egg-info/
 .eggs/
 *.pdf
+
+# Google Drive transient folders (do not track)
+.tmp.driveupload/
+.tmp.drivedownload/
+.tmp.drivetrash/
